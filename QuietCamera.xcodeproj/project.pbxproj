@@ -1,0 +1,47 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+		73437A3031954781CA125CBF = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "QuietCamera/CameraService.swift"; sourceTree = "<group>"; };
+		D3362CE9D116F7F2535514FF = { isa = PBXBuildFile; fileRef = 73437A3031954781CA125CBF; };
+		8CB8938B862338ADA6E51415 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "QuietCamera/CameraView.swift"; sourceTree = "<group>"; };
+		61C2DBFACD87DDAEAAFFAE87 = { isa = PBXBuildFile; fileRef = 8CB8938B862338ADA6E51415; };
+		921B3F6283D5CADED5D4A0AF = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "QuietCamera/QuietCameraApp.swift"; sourceTree = "<group>"; };
+		70ABBFC18DB26A7D09E123B0 = { isa = PBXBuildFile; fileRef = 921B3F6283D5CADED5D4A0AF; };
+		7D1043473D55BFA90E8530D3 = { isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = QuietCamera.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DC76E9F0C0006E8F919E0C51 = { isa = PBXGroup; children = (73437A3031954781CA125CBF, 8CB8938B862338ADA6E51415, 921B3F6283D5CADED5D4A0AF, FBDC4F23F93125BBEEAE800C,); sourceTree = "<group>"; };
+		FBDC4F23F93125BBEEAE800C = { isa = PBXGroup; children = (7D1043473D55BFA90E8530D3,); name = Products; sourceTree = "<group>"; };
+		BCE16DD0260827ECF338C787 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (D3362CE9D116F7F2535514FF, 61C2DBFACD87DDAEAAFFAE87, 70ABBFC18DB26A7D09E123B0,); runOnlyForDeploymentPostprocessing = 0; };
+		7561BFB015D8F536760CB671 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		0189424A5A60FED329FA868E = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		AB52CB08E0FDF02BF6C67C33 = { isa = XCBuildConfiguration; buildSettings = { CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+            SWIFT_VERSION = 5.0; SWIFT_STRICT_CONCURRENCY = minimal; ENABLE_USER_SCRIPT_SANDBOXING = YES;
+            CLANG_ENABLE_OBJC_ARC = YES; GCC_C_LANGUAGE_STANDARD = gnu17; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; DEBUG_INFORMATION_FORMAT = dwarf; }; name = Debug; };
+		59E1BEE911F66DA37FEBACDC = { isa = XCBuildConfiguration; buildSettings = { PRODUCT_BUNDLE_IDENTIFIER = com.sanarurung.QuietCamera; PRODUCT_NAME = "$(TARGET_NAME)";
+            INFOPLIST_FILE = QuietCamera/Info.plist; GENERATE_INFOPLIST_FILE = NO; TARGETED_DEVICE_FAMILY = 1;
+            SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO;
+            CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = "";
+            LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+            LOCALIZATION_PREFERS_STRING_CATALOGS = YES; }; name = Debug; };
+		5283471FF90C511CFE244FFF = { isa = XCBuildConfiguration; buildSettings = { CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+            SWIFT_VERSION = 5.0; SWIFT_STRICT_CONCURRENCY = minimal; ENABLE_USER_SCRIPT_SANDBOXING = YES;
+            CLANG_ENABLE_OBJC_ARC = YES; GCC_C_LANGUAGE_STANDARD = gnu17; SWIFT_OPTIMIZATION_LEVEL = "-O"; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; }; name = Release; };
+		F4C425279CD5DDD18FD6DC6D = { isa = XCBuildConfiguration; buildSettings = { PRODUCT_BUNDLE_IDENTIFIER = com.sanarurung.QuietCamera; PRODUCT_NAME = "$(TARGET_NAME)";
+            INFOPLIST_FILE = QuietCamera/Info.plist; GENERATE_INFOPLIST_FILE = NO; TARGETED_DEVICE_FAMILY = 1;
+            SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO;
+            CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = "";
+            LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+            LOCALIZATION_PREFERS_STRING_CATALOGS = YES; }; name = Release; };
+		4BA304E783CFBB9FA6E56552 = { isa = XCConfigurationList; buildConfigurations = (AB52CB08E0FDF02BF6C67C33, 5283471FF90C511CFE244FFF,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		1329ED92EA4767251759D0DA = { isa = XCConfigurationList; buildConfigurations = (59E1BEE911F66DA37FEBACDC, F4C425279CD5DDD18FD6DC6D,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		0E8A3AD980EC179856012B7E = { isa = PBXNativeTarget; buildConfigurationList = 1329ED92EA4767251759D0DA; buildPhases = (BCE16DD0260827ECF338C787, 7561BFB015D8F536760CB671, 0189424A5A60FED329FA868E,); buildRules = (); dependencies = (); name = QuietCamera; productName = QuietCamera; productReference = 7D1043473D55BFA90E8530D3; productType = "com.apple.product-type.application"; };
+		98F54143AB4E86B28C3AFEE0 = { isa = PBXProject; attributes = { BuildIndependentTargetsInParallel = YES; LastUpgradeCheck = 1600; };
+        buildConfigurationList = 4BA304E783CFBB9FA6E56552; compatibilityVersion = "Xcode 14.0";
+        developmentRegion = ko; hasScannedForEncodings = 0; knownRegions = (ko, en, Base,);
+        mainGroup = DC76E9F0C0006E8F919E0C51; productRefGroup = FBDC4F23F93125BBEEAE800C;
+        projectDirPath = ""; projectRoot = ""; targets = (0E8A3AD980EC179856012B7E,); };
+	};
+	rootObject = 98F54143AB4E86B28C3AFEE0;
+}

@@ -1,0 +1,68 @@
+name: iOS build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build unsigned iPhone app
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify project and toolchain
+        run: |
+          xcodebuild -version
+          python3 scripts/generate_project.py --check
+          plutil -lint QuietCamera/Info.plist QuietCamera.xcodeproj/project.pbxproj
+      - name: Build for iPhone
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build dist
+          xcodebuild build \
+            -project QuietCamera.xcodeproj \
+            -scheme QuietCamera \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            -resultBundlePath build/Build.xcresult \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            2>&1 | tee build/xcodebuild.log
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/package/Payload
+          ditto build/DerivedData/Build/Products/Release-iphoneos/QuietCamera.app build/package/Payload/QuietCamera.app
+          (cd build/package && zip -qry ../../dist/QuietCamera-unsigned.ipa Payload)
+          cp README.md dist/BUILD-NOTES.md
+          shasum -a 256 dist/QuietCamera-unsigned.ipa > dist/SHA256SUMS.txt
+      - name: Upload unsigned app
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuietCamera-unsigned-iphone
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcode-build-diagnostics
+          path: |
+            build/xcodebuild.log
+            build/Build.xcresult
+          if-no-files-found: ignore
+          retention-days: 7
