@@ -8,9 +8,14 @@ struct CameraView: View {
     @State private var mode = CameraService.Mode.automatic
     @State private var showGrid = true
     @State private var showLibrary = false
+    @State private var blackout = false
+    @State private var previousBrightness: CGFloat?
+    @AppStorage("recordAudio") private var recordAudio = true
+    @AppStorage("blackoutOnRecord") private var blackoutOnRecord = false
     private let accent = Color(red: 0.79, green: 0.95, blue: 0.49)
 
     private var usesPhoto: Bool { mode == .automatic && camera.nativeQuietSupported }
+    private var recording: Bool { camera.recordingPhase == .recording }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -55,7 +60,8 @@ struct CameraView: View {
                     }
                     VStack {
                         HStack {
-                            Label(usesPhoto ? "무음 사진" : "무음 프레임", systemImage: "speaker.slash.fill")
+                            Label(camera.videoMode ? "동영상" : (usesPhoto ? "무음 사진" : "무음 프레임"),
+                                  systemImage: camera.videoMode ? "video.fill" : "speaker.slash.fill")
                                 .font(.caption.weight(.medium))
                                 .padding(.horizontal, 12).padding(.vertical, 8)
                                 .background(.black.opacity(0.55), in: Capsule())
@@ -66,6 +72,16 @@ struct CameraView: View {
                             }.accessibilityLabel(showGrid ? "격자 끄기" : "격자 켜기")
                         }
                         Spacer()
+                        HStack(spacing: 10) {
+                            ForEach(camera.lenses) { lens in
+                                Button { camera.selectLens(lens.id) } label: {
+                                    Text(lens.label).font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 14).padding(.vertical, 9)
+                                        .foregroundStyle(camera.selectedLensID == lens.id ? .black : .white)
+                                        .background(camera.selectedLensID == lens.id ? accent : Color.black.opacity(0.6), in: Capsule())
+                                }.accessibilityLabel("\(lens.label) 렌즈 선택")
+                            }
+                        }.disabled(camera.capturing || !camera.ready)
                         if camera.maxZoom > 1 {
                             HStack(spacing: 16) {
                                 Text(String(format: "%.1f×", Double(camera.zoom)))
@@ -84,9 +100,18 @@ struct CameraView: View {
             .padding(.horizontal, 12)
 
             VStack(spacing: 14) {
-                Picker("촬영 방식", selection: $mode) {
-                    ForEach(CameraService.Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.segmented).frame(width: 220).disabled(camera.capturing)
+                Picker("사진 또는 동영상", selection: Binding(get: { camera.videoMode }, set: { camera.setVideoMode($0) })) {
+                    Text("사진").tag(false)
+                    Text("동영상").tag(true)
+                }.pickerStyle(.segmented).frame(width: 220).disabled(camera.capturing || !camera.ready)
+                if camera.videoMode {
+                    RecordingControls(camera: camera, recordAudio: $recordAudio,
+                                      blackoutOnRecord: $blackoutOnRecord, blackout: $blackout)
+                } else {
+                    Picker("촬영 방식", selection: $mode) {
+                        ForEach(CameraService.Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }.pickerStyle(.segmented).frame(width: 220).disabled(camera.capturing)
+                }
 
                 HStack {
                     Button { showLibrary = true } label: {
@@ -96,15 +121,24 @@ struct CameraView: View {
                                 Image(uiImage: image).resizable().scaledToFill()
                             } else { Image(systemName: "photo.on.rectangle").font(.title3) }
                         }.frame(width: 54, height: 54).clipShape(RoundedRectangle(cornerRadius: 14))
-                    }.accessibilityLabel("저장된 사진 열기")
+                    }.disabled(camera.capturing).accessibilityLabel("저장된 사진 및 동영상 열기")
                     Spacer()
-                    Button { camera.capture(mode: mode) } label: {
+                    Button {
+                        if camera.videoMode {
+                            if recording { camera.stopRecording() } else { camera.startRecording(includeAudio: recordAudio) }
+                        } else { camera.capture(mode: mode) }
+                    } label: {
                         ZStack {
                             Circle().stroke(.white.opacity(0.9), lineWidth: 3).frame(width: 78, height: 78)
-                            Circle().fill(camera.capturing ? .gray : accent).frame(width: 64, height: 64)
-                            if camera.capturing { ProgressView().tint(.black) }
+                            if recording {
+                                RoundedRectangle(cornerRadius: 7).fill(.red).frame(width: 30, height: 30)
+                            } else {
+                                Circle().fill(camera.capturing ? .gray : (camera.videoMode ? .red : accent)).frame(width: 64, height: 64)
+                                if camera.capturing { ProgressView().tint(.black) }
+                            }
                         }
-                    }.disabled(!camera.ready || camera.capturing).accessibilityLabel("사진 촬영")
+                    }.disabled(!recording && (!camera.ready || camera.capturing))
+                        .accessibilityLabel(camera.videoMode ? (recording ? "녹화 중지" : "녹화 시작") : "사진 촬영")
                     Spacer()
                     Button { camera.flip() } label: {
                         Image(systemName: "arrow.triangle.2.circlepath.camera")
@@ -115,16 +149,48 @@ struct CameraView: View {
 
                 VStack(spacing: 5) {
                     Text(camera.message).font(.caption).foregroundStyle(.white.opacity(0.85))
-                    Text(usesPhoto ? "공식 촬영음 억제 API · JPEG 사진" : "영상 원본 프레임 저장 · 일반 사진과 화질이 달라요")
+                    Text(camera.videoMode ? "MOV 동영상 · 렌즈는 녹화 시작 전에 선택하세요" :
+                         (usesPhoto ? "공식 촬영음 억제 API · JPEG 사진" : "영상 원본 프레임 저장 · 일반 사진과 화질이 달라요"))
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 }.multilineTextAlignment(.center).frame(minHeight: 36)
             }.padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 10)
         }
         .background(Color(red: 0.035, green: 0.045, blue: 0.04))
         .foregroundStyle(.white)
+        .accessibilityHidden(blackout)
+        .overlay {
+            if blackout {
+                Button { blackout = false } label: {
+                    Color.black.ignoresSafeArea().contentShape(Rectangle())
+                }.buttonStyle(.plain).ignoresSafeArea()
+                    .accessibilityLabel("녹화 화면 다시 표시")
+            }
+        }
+        .statusBarHidden(blackout)
+        .persistentSystemOverlays(blackout ? .hidden : .automatic)
         .onAppear { if scenePhase == .active { camera.resume() } }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { camera.resume() } else { camera.pause() }
+            if phase == .active { camera.resume() }
+            else if phase == .background { blackout = false; camera.pause() }
+        }
+        .onChange(of: camera.recordingPhase) { _, phase in
+            if phase == .recording && blackoutOnRecord { blackout = true }
+            if phase != .recording { blackout = false }
+            UIApplication.shared.isIdleTimerDisabled = phase == .starting || phase == .recording || phase == .stopping
+        }
+        .onChange(of: blackout) { _, enabled in
+            if enabled {
+                previousBrightness = UIScreen.main.brightness
+                UIScreen.main.brightness = 0
+            } else if let previousBrightness {
+                UIScreen.main.brightness = previousBrightness
+                self.previousBrightness = nil
+            }
+        }
+        .onDisappear {
+            if let previousBrightness { UIScreen.main.brightness = previousBrightness; self.previousBrightness = nil }
+            UIApplication.shared.isIdleTimerDisabled = false
+            camera.pause()
         }
         .sheet(isPresented: $showLibrary) { CaptureLibrary() }
     }
@@ -159,24 +225,24 @@ private struct CaptureLibrary: View {
         NavigationStack {
             Group {
                 if files.isEmpty {
-                    ContentUnavailableView("아직 사진이 없어요", systemImage: "photo", description: Text("촬영한 사진은 이곳에서 공유할 수 있어요."))
+                    ContentUnavailableView("아직 촬영 파일이 없어요", systemImage: "photo", description: Text("사진과 동영상을 이곳에서 공유할 수 있어요."))
                 } else {
                     List(files, id: \.self) { url in
                         ShareLink(item: url) {
-                            Label(url.deletingPathExtension().lastPathComponent, systemImage: "square.and.arrow.up")
+                            Label(url.lastPathComponent, systemImage: url.pathExtension == "mov" ? "video" : "photo")
                                 .font(.caption).lineLimit(1)
                         }
                     }
                 }
             }
-            .navigationTitle("앱에 저장된 사진")
+            .navigationTitle("사진 및 동영상")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("닫기") { dismiss() } } }
             .task {
                 let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                     .appendingPathComponent("Captures", isDirectory: true)
                 files = ((try? FileManager.default.contentsOfDirectory(at: directory,
                     includingPropertiesForKeys: [.creationDateKey])) ?? [])
-                    .filter { $0.pathExtension.lowercased() == "jpg" }
+                    .filter { ["jpg", "mov"].contains($0.pathExtension.lowercased()) }
                     .sorted { lhs, rhs in
                         let a = (try? lhs.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
                         let b = (try? rhs.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast

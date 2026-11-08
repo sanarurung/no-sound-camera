@@ -6,11 +6,16 @@ import Photos
 import UIKit
 
 /// All capture state and AVFoundation mutations belong to queue.
-/// Published state is delivered on the main queue. No audio input is created.
+/// Published state is delivered on the main queue. Audio is attached only for movies.
 final class CameraService: NSObject, ObservableObject {
     enum Mode: String, CaseIterable {
         case automatic = "자동"
         case frame = "프레임"
+    }
+
+    struct Lens: Identifiable {
+        let id: String
+        let label: String
     }
 
     let session = AVCaptureSession()
@@ -19,6 +24,14 @@ final class CameraService: NSObject, ObservableObject {
     private let context = CIContext()
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
+    private let movieOutput = AVCaptureMovieFileOutput()
+    private var audioInput: AVCaptureDeviceInput?
+    private var movieMode = false
+    private var lifecycle = RecordingLifecycle()
+    private var recordingRequest: UUID?
+    private var devices: [AVCaptureDevice] = []
+    // Accessed on the main queue only. Gives a stopped movie time to finalize on background entry.
+    private var backgroundTask = UIBackgroundTaskIdentifier.invalid
     private var input: AVCaptureDeviceInput?
     private var configured = false
     private var active = false
@@ -35,6 +48,12 @@ final class CameraService: NSObject, ObservableObject {
     @Published private(set) var thumbnail: UIImage?
     @Published private(set) var zoom: CGFloat = 1
     @Published private(set) var maxZoom: CGFloat = 1
+    @Published private(set) var lenses: [Lens] = []
+    @Published private(set) var selectedLensID = ""
+    @Published private(set) var videoMode = false
+    @Published private(set) var recordingPhase = RecordingLifecycle.Phase.idle
+    @Published private(set) var recordingStartedAt: Date?
+    @Published private(set) var recordingHasAudio = false
 
     override init() {
         super.init()
@@ -44,12 +63,14 @@ final class CameraService: NSObject, ObservableObject {
             guard let self else { return }
             self.queue.async {
                 self.cancelPendingFrame()
+                self.stopMovie()
                 self.publish { $0.ready = false; $0.message = "카메라 사용이 잠시 중단되었어요" }
             }
         })
         observers.append(center.addObserver(forName: AVCaptureSession.interruptionEndedNotification,
                                             object: session, queue: nil) { [weak self] _ in
-            self?.resume()
+            guard let self else { return }
+            self.queue.async { if self.active { self.configureAndStart() } }
         })
         observers.append(center.addObserver(forName: AVCaptureSession.runtimeErrorNotification,
                                             object: session, queue: nil) { [weak self] note in
@@ -57,6 +78,7 @@ final class CameraService: NSObject, ObservableObject {
             guard let self else { return }
             self.queue.async {
                 self.cancelPendingFrame()
+                self.stopMovie()
                 if error?.code == .mediaServicesWereReset, self.active {
                     self.startSession()
                 } else {
@@ -94,7 +116,11 @@ final class CameraService: NSObject, ObservableObject {
         queue.async {
             self.active = false
             self.cancelPendingFrame()
-            if self.session.isRunning { self.session.stopRunning() }
+            self.stopMovie()
+            // Finalize the movie before stopping the session. The delegate stops it afterwards.
+            if self.lifecycle.phase == .idle || self.lifecycle.phase == .saving {
+                if self.session.isRunning { self.session.stopRunning() }
+            }
             self.publish { $0.ready = false }
         }
     }
@@ -125,6 +151,9 @@ final class CameraService: NSObject, ObservableObject {
                 }
                 session.addOutput(photoOutput)
                 session.addOutput(videoOutput)
+                devices = AVCaptureDevice.DiscoverySession(deviceTypes: [
+                    .builtInUltraWideCamera, .builtInWideAngleCamera, .builtInTelephotoCamera
+                ], mediaType: .video, position: .unspecified).devices
                 videoOutput.alwaysDiscardsLateVideoFrames = true
                 videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
                 videoOutput.setSampleBufferDelegate(self, queue: queue)
@@ -139,7 +168,8 @@ final class CameraService: NSObject, ObservableObject {
     }
 
     private func configureConnections() {
-        for connection in [videoOutput.connection(with: .video), photoOutput.connection(with: .video)] {
+        for connection in [videoOutput.connection(with: .video), photoOutput.connection(with: .video),
+                           movieOutput.connection(with: .video)] {
             guard let connection else { continue }
             if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
             if connection.isVideoMirroringSupported {
@@ -147,7 +177,7 @@ final class CameraService: NSObject, ObservableObject {
                 connection.isVideoMirrored = false
             }
         }
-        if let dimensions = input?.device.activeFormat.supportedMaxPhotoDimensions.max(by: {
+        if !movieMode, let dimensions = input?.device.activeFormat.supportedMaxPhotoDimensions.max(by: {
             Int64($0.width) * Int64($0.height) < Int64($1.width) * Int64($1.height)
         }) { photoOutput.maxPhotoDimensions = dimensions }
         publishCapabilities()
@@ -157,10 +187,31 @@ final class CameraService: NSObject, ObservableObject {
         let supported = photoOutput.isShutterSoundSuppressionSupported
         let maximum = min(input?.device.activeFormat.videoMaxZoomFactor ?? 1, 5)
         let currentZoom = input?.device.videoZoomFactor ?? 1
+        let current = input?.device
+        let available = devices.filter { $0.position == current?.position }.sorted {
+            func rank(_ device: AVCaptureDevice) -> Int {
+                switch device.deviceType {
+                case .builtInUltraWideCamera: return 0
+                case .builtInTelephotoCamera: return 2
+                default: return 1
+                }
+            }
+            return rank($0) < rank($1)
+        }.map { device -> Lens in
+            let label: String
+            switch device.deviceType {
+            case .builtInUltraWideCamera: label = "초광각"
+            case .builtInTelephotoCamera: label = "망원"
+            default: label = "광각"
+            }
+            return Lens(id: device.uniqueID, label: label)
+        }
         publish {
             $0.nativeQuietSupported = supported
             $0.zoom = currentZoom
             $0.maxZoom = maximum
+            $0.lenses = available
+            $0.selectedLensID = current?.uniqueID ?? ""
         }
     }
 
@@ -169,24 +220,182 @@ final class CameraService: NSObject, ObservableObject {
         if !session.isRunning { session.startRunning() }
         publishCapabilities()
         let running = session.isRunning && !session.isInterrupted
-        publish { $0.ready = running; $0.cameraDenied = false; $0.message = running ? "촬영 준비 완료" : "카메라를 사용할 수 없어요" }
+        publish {
+            $0.ready = running
+            $0.cameraDenied = false
+            if !$0.capturing { $0.message = running ? "촬영 준비 완료" : "카메라를 사용할 수 없어요" }
+        }
     }
 
     func flip() {
         queue.async {
             guard self.configured, self.active, !self.busy, let old = self.input else { return }
             let position: AVCaptureDevice.Position = old.device.position == .back ? .front : .back
-            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position),
-                  let replacement = try? AVCaptureDeviceInput(device: device) else { return }
+            guard let device = self.devices.first(where: { $0.position == position && $0.deviceType == .builtInWideAngleCamera })
+                ?? self.devices.first(where: { $0.position == position }) else { return }
+            self.replaceCamera(with: device)
+        }
+    }
+
+    func selectLens(_ id: String) {
+        queue.async {
+            guard self.configured, self.active, !self.busy,
+                  let device = self.devices.first(where: { $0.uniqueID == id }),
+                  device.uniqueID != self.input?.device.uniqueID else { return }
+            self.replaceCamera(with: device)
+        }
+    }
+
+    private func replaceCamera(with device: AVCaptureDevice) {
+        guard let old = input, let replacement = try? AVCaptureDeviceInput(device: device) else { return }
+        session.beginConfiguration()
+        session.removeInput(old)
+        if session.canAddInput(replacement) {
+            session.addInput(replacement)
+            input = replacement
+            if movieMode { chooseVideoPreset() }
+        } else { session.addInput(old) }
+        configureConnections()
+        session.commitConfiguration()
+        publishCapabilities()
+    }
+
+    /// Separate movie and photo output graphs so unsupported simultaneous outputs cannot block recording.
+    func setVideoMode(_ enabled: Bool) {
+        queue.async {
+            guard self.configured, self.active, !self.busy, enabled != self.movieMode else { return }
             self.session.beginConfiguration()
-            self.session.removeInput(old)
-            if self.session.canAddInput(replacement) {
-                self.session.addInput(replacement)
-                self.input = replacement
-            } else { self.session.addInput(old) }
+            let previous = self.movieMode
+            do {
+                try self.installOutputs(video: enabled)
+            } catch {
+                try? self.installOutputs(video: previous)
+                self.publish { $0.message = "촬영 모드를 변경할 수 없어요" }
+            }
             self.configureConnections()
             self.session.commitConfiguration()
+            let installed = self.movieMode
+            self.publish { $0.videoMode = installed }
+            self.publishCapabilities()
         }
+    }
+
+    private func chooseVideoPreset() {
+        session.sessionPreset = session.canSetSessionPreset(.hd1920x1080) ? .hd1920x1080 : .high
+    }
+
+    private func installOutputs(video: Bool) throws {
+        for output in session.outputs { session.removeOutput(output) }
+        removeAudioInput()
+        if video { chooseVideoPreset() } else { session.sessionPreset = .photo }
+        let outputs: [AVCaptureOutput] = video ? [movieOutput] : [photoOutput, videoOutput]
+        for output in outputs {
+            guard session.canAddOutput(output) else { throw CameraError.unavailable }
+            session.addOutput(output)
+        }
+        movieMode = video
+    }
+
+    private func updateRecordingPhase() {
+        let phase = lifecycle.phase
+        publish { $0.recordingPhase = phase }
+    }
+
+    func startRecording(includeAudio: Bool) {
+        queue.async {
+            guard self.active, self.movieMode, self.session.isRunning, !self.session.isInterrupted,
+                  !self.busy, self.lifecycle.begin() else { return }
+            self.busy = true
+            DispatchQueue.main.async { self.beginMovieBackgroundTask() }
+            let request = UUID()
+            self.recordingRequest = request
+            self.updateRecordingPhase()
+            self.publish { $0.capturing = true; $0.message = "녹화를 준비하고 있어요" }
+            if includeAudio && AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    self.queue.async { self.beginMovie(request: request, audio: granted) }
+                }
+            } else {
+                self.beginMovie(request: request, audio: includeAudio && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized)
+            }
+        }
+    }
+
+    private func beginMovie(request: UUID, audio: Bool) {
+        guard recordingRequest == request, active, lifecycle.phase == .authorizing else { return }
+        do {
+            session.beginConfiguration()
+            removeAudioInput()
+            if audio, let device = AVCaptureDevice.default(for: .audio),
+               let microphone = try? AVCaptureDeviceInput(device: device), session.canAddInput(microphone) {
+                session.addInput(microphone)
+                audioInput = microphone
+            }
+            configureConnections()
+            session.commitConfiguration()
+            let url = try capturesDirectory().appendingPathComponent("Quiet-\(UUID().uuidString).mov")
+            guard lifecycle.authorized(), let connection = movieOutput.connection(with: .video), connection.isActive else {
+                throw CameraError.unavailable
+            }
+            if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .auto }
+            if movieOutput.availableVideoCodecTypes.contains(.h264) {
+                movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.h264], for: connection)
+            }
+            let hasAudio = audioInput != nil
+            publish { $0.recordingHasAudio = hasAudio }
+            updateRecordingPhase()
+            movieOutput.startRecording(to: url, recordingDelegate: self)
+        } catch {
+            detachAudio()
+            lifecycle.reset()
+            updateRecordingPhase()
+            finish("녹화를 시작할 수 없어요: \(error.localizedDescription)")
+        }
+    }
+
+    func stopRecording() { queue.async { self.stopMovie() } }
+
+    private func beginMovieBackgroundTask() {
+        guard backgroundTask == .invalid else { return }
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Finish camera movie") { [weak self] in
+            guard let self else { return }
+            self.queue.async { self.stopMovie() }
+            self.endMovieBackgroundTask()
+        }
+    }
+
+    private func endMovieBackgroundTask() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
+    }
+
+    private func stopMovie() {
+        let wasAuthorizing = lifecycle.phase == .authorizing
+        let shouldStop = lifecycle.stop()
+        if wasAuthorizing {
+            recordingRequest = nil
+            finish("녹화 준비가 취소되었어요")
+        }
+        updateRecordingPhase()
+        if shouldStop { movieOutput.stopRecording() }
+    }
+
+    private func removeAudioInput() {
+        if let audioInput { session.removeInput(audioInput); self.audioInput = nil }
+    }
+
+    private func detachAudio() {
+        session.beginConfiguration()
+        removeAudioInput()
+        session.commitConfiguration()
+    }
+
+    private func capturesDirectory() throws -> URL {
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Captures", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
     }
 
     func setZoom(_ factor: CGFloat) {
@@ -204,7 +413,7 @@ final class CameraService: NSObject, ObservableObject {
 
     func capture(mode: Mode) {
         queue.async {
-            guard self.active, self.session.isRunning, !self.session.isInterrupted, !self.busy else { return }
+            guard self.active, !self.movieMode, self.session.isRunning, !self.session.isInterrupted, !self.busy else { return }
             self.busy = true
             self.publish { $0.capturing = true; $0.message = "사진을 저장하고 있어요" }
             // Re-check on every request. Never invoke the still API without suppression support.
@@ -233,19 +442,29 @@ final class CameraService: NSObject, ObservableObject {
 
     private func finish(_ message: String) {
         busy = false
+        DispatchQueue.main.async { self.endMovieBackgroundTask() }
+        if lifecycle.phase == .saving {
+            lifecycle.reset()
+            recordingRequest = nil
+            updateRecordingPhase()
+        }
         publish { $0.capturing = false; $0.message = message }
     }
 
     private func save(_ data: Data, suffix: String, source: String) {
         // Called on encoder queue. Keep a recoverable original before requesting Photos access.
         do {
-            let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("Captures", isDirectory: true)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let url = folder.appendingPathComponent("Quiet-\(UUID().uuidString).\(suffix)")
+            let url = try capturesDirectory().appendingPathComponent("Quiet-\(UUID().uuidString).\(suffix)")
             try data.write(to: url, options: .atomic)
             let thumb = UIImage(data: data)?.preparingThumbnail(of: CGSize(width: 180, height: 180))
             publish { $0.lastURL = url; $0.thumbnail = thumb }
+            saveToLibrary(url: url, type: .photo, source: source)
+        } catch {
+            queue.async { self.finish("저장 실패: \(error.localizedDescription)") }
+        }
+    }
+
+    private func saveToLibrary(url: URL, type: PHAssetResourceType, source: String) {
             PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
                 guard status == .authorized || status == .limited else {
                     self.queue.async { self.finish("앱 내부에 저장됨 · 공유 버튼으로 내보내세요") }
@@ -253,21 +472,54 @@ final class CameraService: NSObject, ObservableObject {
                 }
                 PHPhotoLibrary.shared().performChanges({
                     let request = PHAssetCreationRequest.forAsset()
-                    request.addResource(with: .photo, fileURL: url, options: nil)
+                    request.addResource(with: type, fileURL: url, options: nil)
                 }) { success, _ in
                     self.queue.async {
                         self.finish(success ? "\(source) · 사진 앱에 저장했어요" : "사진 앱 저장 실패 · 앱 내부 원본은 공유 가능해요")
                     }
                 }
             }
-        } catch {
-            queue.async { self.finish("저장 실패: \(error.localizedDescription)") }
-        }
     }
 
     private enum CameraError: LocalizedError {
         case unavailable
         var errorDescription: String? { "사용 가능한 카메라가 없습니다" }
+    }
+}
+
+extension CameraService: AVCaptureFileOutputRecordingDelegate {
+    func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL,
+                    from connections: [AVCaptureConnection]) {
+        queue.async {
+            let stopRequested = self.lifecycle.didStart()
+            self.updateRecordingPhase()
+            self.publish {
+                $0.recordingStartedAt = Date()
+                $0.message = $0.recordingHasAudio ? "동영상 녹화 중 · 소리 포함" : "동영상 녹화 중 · 소리 없음"
+            }
+            if stopRequested { self.movieOutput.stopRecording() }
+        }
+    }
+
+    func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo url: URL,
+                    from connections: [AVCaptureConnection], error: Error?) {
+        queue.async {
+            self.lifecycle.didFinish()
+            self.updateRecordingPhase()
+            self.detachAudio()
+            if !self.active && self.session.isRunning { self.session.stopRunning() }
+            self.publish { $0.recordingStartedAt = nil; $0.message = "동영상을 저장하고 있어요" }
+            let recordingError = error as NSError?
+            let successful = error == nil || (recordingError?.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool == true)
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            guard successful, size > 0 else {
+                // Keep partial files locally for recovery; do not claim they are playable.
+                self.finish("녹화 완료 실패 · 앱 내부 파일을 확인해주세요")
+                return
+            }
+            self.publish { $0.lastURL = url; $0.thumbnail = nil }
+            self.saveToLibrary(url: url, type: .video, source: "동영상")
+        }
     }
 }
 

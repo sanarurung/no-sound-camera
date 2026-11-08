@@ -10,10 +10,14 @@
 		61C2DBFACD87DDAEAAFFAE87 = { isa = PBXBuildFile; fileRef = 8CB8938B862338ADA6E51415; };
 		921B3F6283D5CADED5D4A0AF = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "QuietCamera/QuietCameraApp.swift"; sourceTree = "<group>"; };
 		70ABBFC18DB26A7D09E123B0 = { isa = PBXBuildFile; fileRef = 921B3F6283D5CADED5D4A0AF; };
+		B3E838E1086E62B3691089D4 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "QuietCamera/RecordingControls.swift"; sourceTree = "<group>"; };
+		F228C0DAEE93FE033B6E2045 = { isa = PBXBuildFile; fileRef = B3E838E1086E62B3691089D4; };
+		E718917E7B0C34ADACAA468F = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "QuietCamera/RecordingLifecycle.swift"; sourceTree = "<group>"; };
+		D39E6EB4A36874337D6CE183 = { isa = PBXBuildFile; fileRef = E718917E7B0C34ADACAA468F; };
 		7D1043473D55BFA90E8530D3 = { isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = QuietCamera.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		DC76E9F0C0006E8F919E0C51 = { isa = PBXGroup; children = (73437A3031954781CA125CBF, 8CB8938B862338ADA6E51415, 921B3F6283D5CADED5D4A0AF, FBDC4F23F93125BBEEAE800C,); sourceTree = "<group>"; };
+		DC76E9F0C0006E8F919E0C51 = { isa = PBXGroup; children = (73437A3031954781CA125CBF, 8CB8938B862338ADA6E51415, 921B3F6283D5CADED5D4A0AF, B3E838E1086E62B3691089D4, E718917E7B0C34ADACAA468F, FBDC4F23F93125BBEEAE800C,); sourceTree = "<group>"; };
 		FBDC4F23F93125BBEEAE800C = { isa = PBXGroup; children = (7D1043473D55BFA90E8530D3,); name = Products; sourceTree = "<group>"; };
-		BCE16DD0260827ECF338C787 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (D3362CE9D116F7F2535514FF, 61C2DBFACD87DDAEAAFFAE87, 70ABBFC18DB26A7D09E123B0,); runOnlyForDeploymentPostprocessing = 0; };
+		BCE16DD0260827ECF338C787 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (D3362CE9D116F7F2535514FF, 61C2DBFACD87DDAEAAFFAE87, 70ABBFC18DB26A7D09E123B0, F228C0DAEE93FE033B6E2045, D39E6EB4A36874337D6CE183,); runOnlyForDeploymentPostprocessing = 0; };
 		7561BFB015D8F536760CB671 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0189424A5A60FED329FA868E = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		AB52CB08E0FDF02BF6C67C33 = { isa = XCBuildConfiguration; buildSettings = { CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 18.0;

@@ -30,6 +30,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build dist
+          swiftc QuietCamera/RecordingLifecycle.swift tests/RecordingLifecycleTests.swift -o build/recording-lifecycle-tests
+          build/recording-lifecycle-tests
           xcodebuild build \
             -project QuietCamera.xcodeproj \
             -scheme QuietCamera \
